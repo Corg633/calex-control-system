@@ -5,17 +5,16 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 class CalexDBCParser:
-    """Parses and manages Calex DBC file directly from the filesystem"""
+    """Parses Calex DBC file directly from the filesystem"""
     
     def __init__(self, dbc_path: str):
         """
         Initialize by loading the physical .dbc file path
         Args:
-            dbc_path: Path to the .dbc file (e.g., 'CALEX_DCDC_Database_BCE-24V_V4.dbc')
+            dbc_path: Path to the .dbc file on disk
         """
         try:
-            # FIX: load_file reads the file from disk. 
-            # load_string was failing because it expects the text content of the file.
+            # FIX: We use load_file() to tell cantools to open the file at the path provided.
             self.db = cantools.database.load_file(dbc_path)
             logger.info(f"Successfully loaded DBC: {dbc_path}")
         except Exception as e:
@@ -33,7 +32,7 @@ class CalexDBCParser:
             'CMD_LSV': ls_voltage,
             'CMD_LS_CURR': current_limit,
         }
-        # Automatically handles Big Endian packing and 0.1 scaling from the DBC
+        # cantools handles Big Endian and 0.1 scaling automatically based on the DBC
         return self.db.encode_message('CommandMsg', signals)
 
     def decode_any(self, msg_id: int, data: bytes) -> Dict[str, Any]:
