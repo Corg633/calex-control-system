@@ -9,11 +9,6 @@ import can
 print(f"Current Python: {sys.version}")
 print(f"Cantools: {cantools.__version__}")
 print(f"Matplotlib: {plt.get_backend()}")
-# %%
-
-
-#%%
-import matplotlib.pyplot as plt
 
 # Test Data
 voltages = [47.5, 48.0, 48.2, 47.9, 48.1]
