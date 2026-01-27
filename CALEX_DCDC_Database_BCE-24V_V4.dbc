@@ -1,0 +1,107 @@
+VERSION ""
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: CALEX_DCDC CONTROL
+
+
+BO_ 608 CommandMsg: 8 CONTROL
+ SG_ CMD_DXN : 8|1@0+ (1,0) [0|1] "Flag"  CALEX_DCDC
+ SG_ CMD_HSV : 23|16@0+ (0.1,0) [0|54] "Volts"  CALEX_DCDC
+ SG_ CMD_LSV : 39|16@0+ (0.1,0) [0|35] "Volts"  CALEX_DCDC
+ SG_ CMD_LS_CURR : 55|8@0+ (1,0) [0|150] "Amps"  CALEX_DCDC
+ SG_ CMD_RUN : 0|1@0+ (1,0) [0|1] "Flag"  CALEX_DCDC
+
+BO_ 609 LimitMsg: 8 CONTROL
+ SG_ LIM_HS_OVP : 7|8@0+ (0.5,0) [0|58] "Volts"  CALEX_DCDC
+ SG_ LIM_HS_UVP : 23|8@0+ (0.25,0) [0|52] "Volts"  CALEX_DCDC
+ SG_ LIM_LS_OVP : 15|8@0+ (0.25,0) [0|40] "Volts"  CALEX_DCDC
+ SG_ LIM_LS_UVP : 31|8@0+ (0.25,0) [0|40] "Volts"  CALEX_DCDC
+
+BO_ 616 StatusMsg_1: 8 CALEX_DCDC
+ SG_ HS_CURR_MEAS : 55|16@0+ (0.1,-100) [-100|100] "Amps"  CONTROL
+ SG_ HS_VOLT_MEAS : 7|16@0+ (0.01,0) [0|80] "Volts"  CONTROL
+ SG_ LS_CURR_MEAS : 39|16@0+ (0.1,-250) [-250|250] "Amps"  CONTROL
+ SG_ LS_VOLT_MEAS : 23|16@0+ (0.01,0) [0|40] "Volts"  CONTROL
+
+BO_ 617 StatusMsg_2: 8 CALEX_DCDC
+ SG_ DCDC_ERROR_13_RESERVED : 29|1@0+ (1,0) [0|1] "Flag" Vector__XXX
+ SG_ DCDC_ERROR_12_RESERVED : 28|1@0+ (1,0) [0|1] "Flag" Vector__XXX
+ SG_ DCDC_ERROR_0_OTP : 16|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_10_HSDSW : 26|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_11_RESERVED : 27|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_1_LS_OVP : 17|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_2_LS_UVP : 18|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_3_HS_OVP : 19|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_4_HS_UVP : 20|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_5_VDD_ERR : 21|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_6_CAN_OOR : 22|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_7_LS_OCP : 23|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_8_HS_OCP : 24|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_ERROR_9_LSDSW : 25|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_MODE : 3|4@0+ (1,0) [0|15] "enum"  CONTROL
+ SG_ DCDC_READY : 4|1@0+ (1,0) [0|1] "flag"  CONTROL
+ SG_ DCDC_STATE : 5|1@0+ (1,0) [0|1] "Flag"  CONTROL
+ SG_ DCDC_TEMPERATURE : 15|8@0+ (1,-40) [-40|200] "degC"  CONTROL
+
+
+
+CM_ SG_ 617 DCDC_ERROR_6_CAN_OOR "CAN Command / Limit Message is Invalid";
+BA_DEF_  "DBName" STRING ;
+BA_DEF_  "BusType" STRING ;
+BA_DEF_ BO_  "VFrameFormat" ENUM  "StandardCAN","ExtendedCAN","reserved","J1939PG","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","StandardCAN_FD","ExtendedCAN_FD";
+BA_DEF_ BO_  "GenMsgSendType" ENUM  "Cyclic","Event","CyclicIfActive","SpontanWithDelay","CyclicAndSpontan","CyclicAndSpontanWithDelay";
+BA_DEF_ BO_  "GenMsgCycleTime" INT 0 0;
+BA_DEF_ BO_  "GenMsgDelayTime" INT 0 0;
+BA_DEF_ SG_  "GenSigStartValue" FLOAT 0 0;
+BA_DEF_DEF_  "DBName" "Cluster";
+BA_DEF_DEF_  "BusType" "CAN";
+BA_DEF_DEF_  "VFrameFormat" "StandardCAN";
+BA_DEF_DEF_  "GenMsgSendType" "Cyclic";
+BA_DEF_DEF_  "GenMsgCycleTime" 0;
+BA_DEF_DEF_  "GenMsgDelayTime" 0;
+BA_DEF_DEF_  "GenSigStartValue" 0;
+BA_ "DBName" "Cluster";
+BA_ "VFrameFormat" BO_ 608 0;
+BA_ "GenMsgSendType" BO_ 608 1;
+BA_ "VFrameFormat" BO_ 609 0;
+BA_ "GenMsgSendType" BO_ 609 1;
+BA_ "VFrameFormat" BO_ 616 0;
+BA_ "GenMsgSendType" BO_ 616 1;
+BA_ "VFrameFormat" BO_ 617 0;
+BA_ "GenMsgSendType" BO_ 617 1;
+BA_ "GenSigStartValue" SG_ 616 HS_CURR_MEAS 1000;
+BA_ "GenSigStartValue" SG_ 616 LS_CURR_MEAS 2500;
+BA_ "GenSigStartValue" SG_ 617 DCDC_TEMPERATURE 40;
+
