@@ -13,25 +13,43 @@ plt.show()
 import matplotlib.pyplot as plt
 from IPython import display
 
-def create_dashboard():
-    plt.ion()
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
-    fig.tight_layout(pad=3.0)
-    
-    # Titles for our 3 metrics
-    ax1.set_title("High Side Voltage (V)")
-    ax2.set_title("Low Side Voltage (V)")
-    ax3.set_title("Internal Temperature (°C)")
-    
-    return fig, [ax1, ax2, ax3]
+# Setup 3x2 Dashboard (Voltage, Current, Temp for HS and LS)
+plt.ion()
+fig, axs = plt.subplots(3, 2, figsize=(14, 10))
+fig.suptitle('Calex Real-Time Telemetry', fontsize=16)
 
-# This is how you would update it in your loop
-def update_dashboard(axes, data_history):
-    for i, ax in enumerate(axes):
-        ax.cla()
-        ax.plot(data_history[i], color='tab:blue' if i<2 else 'tab:red')
-        # Add a grid so it looks like an oscilloscope
-        ax.grid(True, alpha=0.3) 
+# Column 0: High Side | Column 1: Low Side
+(ax_v_hs, ax_v_ls) = axs[0]
+(ax_i_hs, ax_i_ls) = axs[1]
+(ax_t_hs, ax_t_ls) = axs[2]
+
+def update_monitor(history):
+    """
+    history: a dictionary containing lists of the last 50 data points
+    e.g., history = {'v_hs': [], 'i_hs': [], 't_hs': [], ...}
+    """
+    # Plot Voltages
+    ax_v_hs.set_ylabel("Volts (V)")
+    ax_v_hs.plot(history['v_hs'], color='blue', label="High Side V")
+    
+    ax_v_ls.plot(history['v_ls'], color='cyan', label="Low Side V")
+
+    # Plot Currents
+    ax_i_hs.set_ylabel("Amps (A)")
+    ax_i_hs.plot(history['i_hs'], color='green', label="High Side I")
+    
+    ax_i_ls.plot(history['i_ls'], color='orange', label="Low Side I")
+
+    # Plot Temperatures
+    ax_t_hs.set_ylabel("Temp (°C)")
+    ax_t_hs.plot(history['t_hs'], color='red', label="HS Internal Temp")
+    
+    ax_t_ls.plot(history['t_ls'], color='darkred', label="LS Internal Temp")
+
+    # Formatting
+    for ax in axs.flat:
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='upper right', fontsize='small')
     
     display.display(plt.gcf())
     display.clear_output(wait=True)
