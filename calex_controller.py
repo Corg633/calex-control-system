@@ -64,53 +64,56 @@ def update_monitor(history):
     
     display.display(plt.gcf())
     display.clear_output(wait=True)
+
 #%%
 
-# %%
 import can
 import time
+import logging
 from calex_dbc import CalexDBCParser
 
-# 1. Initialize the Parser with your DBC file
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize Parser
 parser = CalexDBCParser('CALEX_DCDC_Database_BCE-24V_V4.dbc')
 
 def main_control_loop():
     try:
-        # Connect to the hardware interface
-        with can.interface.Bus('can0', bustype='socketcan') as bus:
-            print("Control Loop Started. Monitoring for CAN_OOR...")
+        # Fixed: interface and channel arguments to remove DeprecationWarning
+        with can.interface.Bus(channel='can0', interface='socketcan') as bus:
+            logger.info("Control Loop Started. Monitoring for CAN_OOR...")
 
-            # --- STEP 1: Send Safety Limits (ID 609) ---
-            # Using specs from DBC: HS OVP 58V, LS OVP 40V, etc. [cite: 2]
+            # Step 1: Send Safety Limits (ID 0x261) 
             lim_data = parser.pack_limits(hs_ovp=55.0, ls_ovp=30.0, hs_uvp=24.0, ls_uvp=10.0)
             bus.send(can.Message(arbitration_id=0x261, data=lim_data, is_extended_id=False))
 
             while True:
-                # --- STEP 2: Send Command (ID 608) ---
-                # Set targets: 48V High Side, 13.5V Low Side [cite: 2]
+                # Step 2: Send Command (ID 0x260) 
                 cmd_data = parser.pack_command(run=True, direction=0, 
                                              hs_voltage=48.0, ls_voltage=13.5, 
                                              current_limit=50)
                 bus.send(can.Message(arbitration_id=0x260, data=cmd_data, is_extended_id=False))
 
-                # --- STEP 3: Safety Check (ID 617) ---
+                # Step 3: Monitor Status (ID 0x269) 
                 msg = bus.recv(timeout=0.1)
-                if msg and msg.arbitration_id == 0x269: # StatusMsg_2
+                if msg and msg.arbitration_id == 0x269:
                     status = parser.decode_any(0x269, msg.data)
                     
-                    # Monitoring DCDC_ERROR_6_CAN_OOR 
+                    # Check for Out of Range flag [cite: 4]
                     if status.get('DCDC_ERROR_6_CAN_OOR') == 1:
-                        print("⚠️ ALERT: Calex reports Out of Range Command! Check voltage targets.")
+                        logger.warning("⚠️ CALEX REJECTED COMMAND: Out of Range")
                     
-                    if status.get('errors'): # If any other error flags are active
-                        print(f"Hardware Flags: {status['errors']}")
+                    # Display Temperature with DBC -40 offset 
+                    logger.info(f"Temp: {status.get('DCDC_TEMPERATURE')}°C | Ready: {status.get('DCDC_READY')}")
 
-                time.sleep(0.5) # Send commands at 2Hz
+                time.sleep(0.5)
 
     except KeyboardInterrupt:
-        print("Stopping Controller...")
+        logger.info("Shutdown.")
+    except Exception as e:
+        logger.error(f"Unexpected error in control loop: {e}")
 
 if __name__ == "__main__":
     main_control_loop()
-
 # %%
