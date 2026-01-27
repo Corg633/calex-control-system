@@ -2,6 +2,8 @@
 import sys
 import cantools
 import matplotlib.pyplot as plt
+import matplotlib
+#matplotlib.use('Agg')  # Forces Matplotlib to run without a GUI
 import can
 
 print(f"Current Python: {sys.version}")
