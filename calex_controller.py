@@ -1,3 +1,4 @@
+'''
 # %%
 import sys
 import cantools
@@ -61,7 +62,7 @@ def update_monitor(history):
     
     display.display(plt.gcf())
     display.clear_output(wait=True)
-
+'''
 #%%
 
 import can
