@@ -1,3 +1,14 @@
+# %%
+import sys
+import cantools
+import matplotlib.pyplot as plt
+import can
+
+print(f"Current Python: {sys.version}")
+print(f"Cantools: {cantools.__version__}")
+print(f"Matplotlib: {plt.get_backend()}")
+# %%
+
 
 #%%
 import matplotlib.pyplot as plt
