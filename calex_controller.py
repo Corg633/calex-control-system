@@ -1,3 +1,16 @@
+
+#%%
+import matplotlib.pyplot as plt
+
+# Test Data
+voltages = [47.5, 48.0, 48.2, 47.9, 48.1]
+plt.plot(voltages)
+plt.title("Calex High Side Voltage Test")
+plt.ylabel("Volts")
+plt.show()
+
+#%%
+
 #!/usr/bin/env python3
 """
 Main Calex DC-DC Converter Controller
