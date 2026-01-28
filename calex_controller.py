@@ -63,6 +63,7 @@ def update_monitor(history):
     display.display(plt.gcf())
     display.clear_output(wait=True)
 '''
+'''
 #%%
 
 import can
@@ -115,3 +116,96 @@ def main_control_loop():
 if __name__ == "__main__":
     main_control_loop()
 # %%
+'''
+#%%
+import time
+import can
+import logging
+import sys
+import os
+import matplotlib.pyplot as plt
+
+# Force non-interactive backend for SSH compatibility
+os.environ['MPLBACKEND'] = 'Agg'
+from calex_dbc import CalexDBCParser
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
+logger = logging.getLogger(__name__)
+
+# --- CONFIGURATION FLAGS ---
+MODE_DUAL_UNIT = True  # Set False for 1 converter, True for 2 
+ENABLE_PLOTTING = True # Set True to generate a temp plot at the end
+# ---------------------------
+
+DBC_FILE = "CALEX_DCDC_Database_BCE-24V_V4.dbc"
+UNIT_1_OFFSET = 0x0
+UNIT_2_OFFSET = 0x10
+
+# Data storage for plotting
+temp_data = {0x0: [], 0x10: []}
+timestamps = []
+
+def run_calex_startup(bus, parser, offset, target_hsv, target_lsv):
+    """Executes the Engineer-mandated startup sequence."""
+    base_cmd_id = 608 + offset  # 0x260 base 
+    base_stat_id = 617 + offset # 0x269 base [cite: 2]
+    
+    # Reset Phase: Send RUN=0
+    reset_data = parser.pack_command(False, 0, target_hsv, target_lsv, 50) [cite: 11]
+    bus.send(can.Message(arbitration_id=base_cmd_id, data=reset_data, is_extended_id=False))
+    
+    timeout = time.time() + 5.0
+    while time.time() < timeout:
+        msg = bus.recv(timeout=1.0)
+        if msg and msg.arbitration_id == base_stat_id:
+            status = parser.decode_any(base_stat_id, msg.data) [cite: 11]
+            if status.get('DCDC_ERROR_6_CAN_OOR'): [cite: 3, 4]
+                return False
+            if status.get('DCDC_READY'): [cite: 3]
+                # Start Phase: Send RUN=1
+                start_data = parser.pack_command(True, 0, target_hsv, target_lsv, 50) [cite: 11]
+                bus.send(can.Message(arbitration_id=base_cmd_id, data=start_data))
+                return True
+    return False
+
+def main():
+    parser = CalexDBCParser(DBC_FILE) [cite: 11]
+    bus = can.Bus(interface='socketcan', channel='can0', bitrate=500000)
+    
+    # Determine which offsets to use based on flag 
+    active_offsets = [UNIT_1_OFFSET]
+    if MODE_DUAL_UNIT:
+        active_offsets.append(UNIT_2_OFFSET)
+
+    for off in active_offsets:
+        run_calex_startup(bus, parser, off, 48.0, 13.5)
+
+    start_time = time.time()
+    try:
+        while True:
+            msg = bus.recv(timeout=0.1)
+            if msg:
+                for off in active_offsets:
+                    if msg.arbitration_id == (617 + off): # StatusMsg_2 [cite: 2]
+                        data = parser.decode_any(msg.arbitration_id, msg.data) [cite: 11]
+                        temp = data['DCDC_TEMPERATURE'] [cite: 3]
+                        logger.info(f"Unit {hex(off)} Temp: {temp}C")
+                        
+                        if ENABLE_PLOTTING:
+                            temp_data[off].append(temp)
+                            if off == UNIT_1_OFFSET: timestamps.append(time.time() - start_time)
+
+    except KeyboardInterrupt:
+        if ENABLE_PLOTTING:
+            plt.figure(figsize=(10, 5))
+            for off in active_offsets:
+                plt.plot(timestamps[:len(temp_data[off])], temp_data[off], label=f'Unit {hex(off)}')
+            plt.xlabel('Time (s)')
+            plt.ylabel('Temperature (°C)')
+            plt.title('Calex DCDC Temperature Monitoring')
+            plt.legend()
+            plt.savefig('temp_plot.png')
+            print("Plot saved as temp_plot.png")
+
+if __name__ == "__main__":
+    main()
