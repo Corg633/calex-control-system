@@ -121,11 +121,10 @@ if __name__ == "__main__":
 import time
 import can
 import logging
-import sys
 import os
 import matplotlib.pyplot as plt
 
-# Force non-interactive backend for SSH compatibility
+# Force non-interactive backend for SSH
 os.environ['MPLBACKEND'] = 'Agg'
 from calex_dbc import CalexDBCParser
 
@@ -133,79 +132,83 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION FLAGS ---
-MODE_DUAL_UNIT = True  # Set False for 1 converter, True for 2 
+MODE_DUAL_UNIT = True  # Set False for 1 converter, True for 2
 ENABLE_PLOTTING = True # Set True to generate a temp plot at the end
-# ---------------------------
-
 DBC_FILE = "CALEX_DCDC_Database_BCE-24V_V4.dbc"
-UNIT_1_OFFSET = 0x0
-UNIT_2_OFFSET = 0x10
 
 # Data storage for plotting
-temp_data = {0x0: [], 0x10: []}
+temp_history = {0x0: [], 0x10: []}
 timestamps = []
 
 def run_calex_startup(bus, parser, offset, target_hsv, target_lsv):
-    """Executes the Engineer-mandated startup sequence."""
-    base_cmd_id = 608 + offset  # 0x260 base 
-    base_stat_id = 617 + offset # 0x269 base [cite: 2]
+    [cite_start]"""Executes the Engineer-mandated startup sequence[cite: 1, 11]."""
+    [cite_start]base_cmd_id = 608 + offset  # ID 0x260 [cite: 2]
+    [cite_start]base_stat_id = 617 + offset # ID 0x269 [cite: 2, 3]
     
-    # Reset Phase: Send RUN=0
-    reset_data = parser.pack_command(False, 0, target_hsv, target_lsv, 50) [cite: 11]
+    # [cite_start]STEP 3: Reset Phase (RUN=0) [cite: 11]
+    logger.info(f"[{hex(base_cmd_id)}] Sending Reset (RUN=0)...")
+    # [cite_start]CMD_HSV and CMD_LSV use 0.1 scaling [cite: 2, 11]
+    reset_data = parser.pack_command(False, 0, target_hsv, target_lsv, 50)
     bus.send(can.Message(arbitration_id=base_cmd_id, data=reset_data, is_extended_id=False))
     
+    # [cite_start]STEP 4 & 5: Wait for Ready bit [cite: 11]
     timeout = time.time() + 5.0
     while time.time() < timeout:
         msg = bus.recv(timeout=1.0)
         if msg and msg.arbitration_id == base_stat_id:
-            status = parser.decode_any(base_stat_id, msg.data) [cite: 11]
-            if status.get('DCDC_ERROR_6_CAN_OOR'): [cite: 3, 4]
+            status = parser.decode_any(base_stat_id, msg.data)
+            
+            # [cite_start]Check for Out of Range Error [cite: 3, 4]
+            if status.get('DCDC_ERROR_6_CAN_OOR'): 
+                [cite_start]logger.error(f"Unit {hex(base_cmd_id)} Error: CAN_OOR (Invalid targets)") [cite: 4]
                 return False
-            if status.get('DCDC_READY'): [cite: 3]
-                # Start Phase: Send RUN=1
-                start_data = parser.pack_command(True, 0, target_hsv, target_lsv, 50) [cite: 11]
+            
+            # [cite_start]Check Ready bit [cite: 3, 11]
+            if status.get('DCDC_READY'):
+                [cite_start]logger.info(f"Unit {hex(base_cmd_id)} is READY. Starting (RUN=1)...") [cite: 11]
+                # [cite_start]STEP 6: Start Phase (RUN=1) [cite: 11]
+                start_data = parser.pack_command(True, 0, target_hsv, target_lsv, 50)
                 bus.send(can.Message(arbitration_id=base_cmd_id, data=start_data))
                 return True
     return False
 
 def main():
-    parser = CalexDBCParser(DBC_FILE) [cite: 11]
-    bus = can.Bus(interface='socketcan', channel='can0', bitrate=500000)
-    
-    # Determine which offsets to use based on flag 
-    active_offsets = [UNIT_1_OFFSET]
-    if MODE_DUAL_UNIT:
-        active_offsets.append(UNIT_2_OFFSET)
-
-    for off in active_offsets:
-        run_calex_startup(bus, parser, off, 48.0, 13.5)
-
-    start_time = time.time()
     try:
+        parser = CalexDBCParser(DBC_FILE)
+        bus = can.Bus(interface='socketcan', channel='can0', bitrate=500000)
+        
+        offsets = [0x0, 0x10] if MODE_DUAL_UNIT else [0x0]
+        for off in offsets:
+            [cite_start]run_calex_startup(bus, parser, off, 48.0, 13.5) # [cite: 2, 11]
+
+        start_time = time.time()
+        logger.info("Monitoring... Press Ctrl+C to save plot and exit.")
+        
         while True:
             msg = bus.recv(timeout=0.1)
             if msg:
-                for off in active_offsets:
-                    if msg.arbitration_id == (617 + off): # StatusMsg_2 [cite: 2]
-                        data = parser.decode_any(msg.arbitration_id, msg.data) [cite: 11]
-                        temp = data['DCDC_TEMPERATURE'] [cite: 3]
+                for off in offsets:
+                    # [cite_start]StatusMsg_2 contains Temperature [cite: 3]
+                    if msg.arbitration_id == (617 + off): 
+                        data = parser.decode_any(msg.arbitration_id, msg.data)
+                        [cite_start]temp = data['DCDC_TEMPERATURE'] # Scaled with -40 offset [cite: 3, 11]
                         logger.info(f"Unit {hex(off)} Temp: {temp}C")
                         
                         if ENABLE_PLOTTING:
-                            temp_data[off].append(temp)
-                            if off == UNIT_1_OFFSET: timestamps.append(time.time() - start_time)
+                            temp_history[off].append(temp)
+                            if off == 0x0: timestamps.append(time.time() - start_time)
 
     except KeyboardInterrupt:
-        if ENABLE_PLOTTING:
+        if ENABLE_PLOTTING and timestamps:
             plt.figure(figsize=(10, 5))
-            for off in active_offsets:
-                plt.plot(timestamps[:len(temp_data[off])], temp_data[off], label=f'Unit {hex(off)}')
-            plt.xlabel('Time (s)')
-            plt.ylabel('Temperature (°C)')
-            plt.title('Calex DCDC Temperature Monitoring')
+            for off in offsets:
+                if temp_history[off]:
+                    plt.plot(timestamps[:len(temp_history[off])], temp_history[off], label=f'Unit {hex(off)}')
+            [cite_start]plt.ylabel('Temperature (°C)') [cite: 3]
+            plt.title('Calex DCDC Thermal Monitoring')
             plt.legend()
             plt.savefig('temp_plot.png')
-            print("Plot saved as temp_plot.png")
+            logger.info("Plot saved as temp_plot.png")
 
 if __name__ == "__main__":
     main()
