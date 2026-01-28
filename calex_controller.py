@@ -132,8 +132,8 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION FLAGS ---
-MODE_DUAL_UNIT = True  # Toggle for 1 or 2 converters
-ENABLE_PLOTTING = True # Toggle temperature visualization
+MODE_DUAL_UNIT = False  # Toggle for 1 or 2 converters
+ENABLE_PLOTTING = False # Toggle temperature visualization
 DBC_FILE = "CALEX_DCDC_Database_BCE-24V_V4.dbc"
 
 # Data storage for plotting
@@ -212,3 +212,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%
