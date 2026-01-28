@@ -132,8 +132,8 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION FLAGS ---
-MODE_DUAL_UNIT = False  # Toggle for 1 or 2 converters
-ENABLE_PLOTTING = False # Toggle temperature visualization
+MODE_DUAL_UNIT = False
+ENABLE_PLOTTING = False 
 DBC_FILE = "CALEX_DCDC_Database_BCE-24V_V4.dbc"
 
 # Data storage for plotting
@@ -145,27 +145,20 @@ def run_calex_startup(bus, parser, offset, target_hsv, target_lsv):
     base_cmd_id = 608 + offset  # 0x260
     base_stat_id = 617 + offset # 0x269
     
-    # STEP 3: Reset Phase (RUN=0) - Clears errors
-    logger.info(f"[{hex(base_cmd_id)}] Sending Reset (RUN=0)...")
+    logger.info(f"[{hex(base_cmd_id)}] Resetting unit (RUN=0)...")
     reset_data = parser.pack_command(False, 0, target_hsv, target_lsv, 50)
     bus.send(can.Message(arbitration_id=base_cmd_id, data=reset_data, is_extended_id=False))
     
-    # STEP 4 & 5: Wait for Ready bit
     timeout = time.time() + 5.0
     while time.time() < timeout:
         msg = bus.recv(timeout=1.0)
         if msg and msg.arbitration_id == base_stat_id:
             status = parser.decode_any(base_stat_id, msg.data)
-            
-            # Check for Out of Range Error (Bit 22)
-            if status.get('DCDC_ERROR_6_CAN_OOR'): 
-                logger.error(f"Unit {hex(base_cmd_id)} Error: CAN_OOR (Invalid targets)")
+            if status.get('DCDC_ERROR_6_CAN_OOR'):
+                logger.error(f"Unit {hex(base_cmd_id)}: CAN_OOR Error!")
                 return False
-            
-            # Check Ready bit (Bit 4)
             if status.get('DCDC_READY'):
                 logger.info(f"Unit {hex(base_cmd_id)} is READY. Starting (RUN=1)...")
-                # STEP 6: Start Phase (RUN=1)
                 start_data = parser.pack_command(True, 0, target_hsv, target_lsv, 50)
                 bus.send(can.Message(arbitration_id=base_cmd_id, data=start_data))
                 return True
@@ -173,42 +166,38 @@ def run_calex_startup(bus, parser, offset, target_hsv, target_lsv):
 
 def main():
     try:
+        # Check if file exists to avoid another error
+        if not os.path.exists(DBC_FILE):
+            logger.error(f"DBC file not found at {DBC_FILE}")
+            return
+
         parser = CalexDBCParser(DBC_FILE)
         bus = can.Bus(interface='socketcan', channel='can0', bitrate=500000)
         
-        # Mode Selection Logic
         offsets = [0x0, 0x10] if MODE_DUAL_UNIT else [0x0]
         for off in offsets:
             run_calex_startup(bus, parser, off, 48.0, 13.5)
 
         start_time = time.time()
-        logger.info("Monitoring... Press Ctrl+C to save plot and exit.")
-        
         while True:
             msg = bus.recv(timeout=0.1)
             if msg:
                 for off in offsets:
-                    # StatusMsg_2 contains Temperature (ID 617)
-                    if msg.arbitration_id == (617 + off): 
+                    if msg.arbitration_id == (617 + off):
                         data = parser.decode_any(msg.arbitration_id, msg.data)
-                        temp = data['DCDC_TEMPERATURE'] # Scaling: -40 offset
+                        temp = data['DCDC_TEMPERATURE']
                         logger.info(f"Unit {hex(off)} Temp: {temp}C")
-                        
                         if ENABLE_PLOTTING:
                             temp_history[off].append(temp)
                             if off == 0x0: timestamps.append(time.time() - start_time)
-
     except KeyboardInterrupt:
         if ENABLE_PLOTTING and timestamps:
             plt.figure(figsize=(10, 5))
             for off in offsets:
                 if temp_history[off]:
                     plt.plot(timestamps[:len(temp_history[off])], temp_history[off], label=f'Unit {hex(off)}')
-            plt.ylabel('Temperature (°C)')
-            plt.title('Calex DCDC Thermal Monitoring')
-            plt.legend()
             plt.savefig('temp_plot.png')
-            logger.info("Plot saved as temp_plot.png")
+            logger.info("Temperature plot saved as temp_plot.png")
 
 if __name__ == "__main__":
     main()
