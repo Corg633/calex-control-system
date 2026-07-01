@@ -9,23 +9,31 @@ from datetime import datetime
 # ==========================================
 # 1. TIMING & FREQUENCY CONFIGURATION
 # ==========================================
-CAN_HZ = 10.0          # CAN heartbeat frequency
-PRINT_HZ = 10.0          # Terminal printout frequency
-LOG_HZ = 10.0          # CSV logging frequency
+CAN_HZ = 10.0          
+PRINT_HZ = 10.0          
+LOG_HZ = 10.0          
 
-RUN_TIME = 0.5         # Seconds to spend actively running (Buck or Boost)
-DEAD_TIME = 0.001       # Seconds to rest between modes (Hardware relay switch time)
+RUN_TIME = 0.5         
+DEAD_TIME = 0.001       
 
 # ==========================================
 # 2. TARGET CONFIGURATION
 # ==========================================
-BUCK_HSV = 44.0 - 0.0 #- 0.0
-BUCK_LSV = 26.5 + 0.5
-BUCK_AMP = 20.0 - 3.0 #- 18.0 #- 14.5
+# BMS Wake-Up Settings
+BMS_WAKE_LSV = 33.0     # Must be >2V higher than actual pack voltage
+BMS_WAKE_AMP = 2.0      # Keep very low to prevent shocking unbalanced cells
+BMS_WAKE_TIME = 3.0     # Seconds to hold the wake-up pulse
 
-BOOST_HSV = 54.0 + 0.0 #+ 0.0
-BOOST_LSV = 20.0 - 1.5
-BOOST_AMP = 12.5 + 55.0 #- 5.0 #- 1.25
+# Normal Operation Settings (CONSTANT CHARGE)
+BUCK_HSV = 44.0         
+# UPDATED: Lowered voltage to stay under LTO 12S OVP limits
+# 12S LTO max is ~32.4V (2.7V/cell)
+BUCK_LSV = 35.0        
+BUCK_AMP = 30.0         # Start lower to ensure stability
+
+BOOST_HSV = 54.0 
+BOOST_LSV = 20.5        
+BOOST_AMP = 10.0        
 
 # ==========================================
 # 3. DIRECTORY & FILE SETUP
@@ -34,7 +42,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DBC_PATH = os.path.join(SCRIPT_DIR, 'CALEX_DCDC_Database_BCE-24V_V4.dbc')
 LOG_DIR = os.path.join(SCRIPT_DIR, 'logs')
 if not os.path.exists(LOG_DIR): os.makedirs(LOG_DIR)
-CSV_FILENAME = os.path.join(LOG_DIR, f"calex_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+CSV_FILENAME = os.path.join(LOG_DIR, f"calex_charge_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
 
 try:
     db = cantools.database.load_file(DBC_PATH)
@@ -47,13 +55,21 @@ except Exception as e:
 # 4. HARDWARE FUNCTIONS
 # ==========================================
 def setup_gpio():
+    # 1. Setup Calex Wake Pin (PAC.06)
     if not os.path.exists('/sys/class/gpio/PAC.06'):
         os.system('echo "PAC.06" > /sys/class/gpio/export 2>/dev/null')
     os.system('echo "out" > /sys/class/gpio/PAC.06/direction')
-    os.system('echo 0 > /sys/class/gpio/PAC.06/value') 
+    os.system('echo 1 > /sys/class/gpio/PAC.06/value') # Start Isolated (HIGH)
+
+    # 2. Setup BMS Pre-Charge Relay (PQ.06)
+    if not os.path.exists('/sys/class/gpio/PQ.06'):
+        os.system('echo "PQ.06" > /sys/class/gpio/export 2>/dev/null')
+    os.system('echo "out" > /sys/class/gpio/PQ.06/direction')
+    os.system('echo 0 > /sys/class/gpio/PQ.06/value') # Start Relay Open (LOW)
 
 def sleep_gpio():
     os.system('echo 1 > /sys/class/gpio/PAC.06/value') 
+    os.system('echo 0 > /sys/class/gpio/PQ.06/value') 
 
 def send_command(run, direction, hs_v, ls_v, ls_curr):
     try:
@@ -66,25 +82,52 @@ def send_command(run, direction, hs_v, ls_v, ls_curr):
         pass
 
 # ==========================================
-# 5. MAIN SEQUENCE (STATE MACHINE)
+# 5. INITIALIZATION & SAFETY (AUTOMATED WAKEUP)
 # ==========================================
 setup_gpio()
-time.sleep(1.0)
-bus.send(can.Message(arbitration_id=0x261, data=db.encode_message('LimitMsg', {'LIM_HS_OVP': 56.0, 'LIM_LS_OVP': 28.0, 'LIM_HS_UVP': 36.0, 'LIM_LS_UVP': 18.0}), is_extended_id=False))
-send_command(False, 0, 48.0, 24.0, 0.0) # Clear faults
+
+print("\n[BOOT] 1. Closing Pre-Charge Relay (PQ.06) to trick Calex...")
+os.system('echo 1 > /sys/class/gpio/PQ.06/value')
+time.sleep(1.0) 
+
+print("[BOOT] 2. Waking Calex (PAC.06 LOW)... waiting for DSP to boot...")
+os.system('echo 0 > /sys/class/gpio/PAC.06/value')
+time.sleep(3.0) 
+
+print("[BOOT] 3. Sending safety limits and clearing hardware faults...")
+for _ in range(3): # Send multiple times to ensure Calex DSP catches it during boot
+    try:
+        # INCREASED hardware OVP limits to prevent ripple-tripping at high currents
+        bus.send(can.Message(arbitration_id=0x261, data=db.encode_message('LimitMsg', {'LIM_HS_OVP': 58.0, 'LIM_LS_OVP': 38.0, 'LIM_HS_UVP': 36.0, 'LIM_LS_UVP': 18.0}), is_extended_id=False), timeout=0.1)
+    except Exception as e:
+        print(f"   [WARNING] LimitMsg failed to send ({e}). Calex might still be booting.")
+    time.sleep(0.1)
+
+send_command(False, 0, 48.0, 24.0, 0.0) 
 time.sleep(0.5)
 
-# State Machine Definitions
-S_BUCK = 0
-S_DEAD_1 = 1
-S_BOOST = 2
-S_DEAD_2 = 3
+# ==========================================
+# 6. JKBMS WAKE-UP ROUTINE
+# ==========================================
+print(f"\n[BOOT] 4. Pushing 33V to trigger JKBMS MOSFETs...")
+wake_start = time.time()
 
-current_state = S_BUCK
-last_state_change = time.time()
-seq_tag = "BUCK"
+while time.time() - wake_start < BMS_WAKE_TIME:
+    send_command(run=True, direction=0, hs_v=BUCK_HSV, ls_v=BMS_WAKE_LSV, ls_curr=BMS_WAKE_AMP)
+    time.sleep(1.0 / CAN_HZ)
 
-print(f"\n---> Starting Pulse Sequence | CAN: {CAN_HZ}Hz | DeadTime: {DEAD_TIME}s")
+print("[BOOT] 5. Opening Pre-Charge Relay (PQ.06) - JKBMS is now holding the load.")
+os.system('echo 0 > /sys/class/gpio/PQ.06/value')
+time.sleep(0.5)
+
+print("[BOOT] Initialization complete. Transitioning to CONSTANT BUCK (60A Charge) mode.")
+
+# ==========================================
+# 7. MAIN SEQUENCE (CONSTANT BUCK FOR CHARGING)
+# ==========================================
+seq_tag = "BUCK_CHG"
+
+print(f"\n---> Starting Continuous Charge | Target: {BUCK_AMP}A | Max Volts: {BUCK_LSV}V")
 
 with open(CSV_FILENAME, mode='w', newline='') as file:
     writer = csv.writer(file)
@@ -99,43 +142,14 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
             now = time.time()
             timestamp_str = datetime.now().strftime('%H:%M:%S.%f')[:-3]
 
-            # --- A. STATE MACHINE (NO SLEEP BLOCKS!) ---
-            if current_state == S_BUCK:
-                seq_tag = "BUCK"
-                if now - last_state_change >= RUN_TIME:
-                    current_state = S_DEAD_1
-                    last_state_change = now
-            
-            elif current_state == S_DEAD_1:
-                seq_tag = "DEAD_TIME"
-                if now - last_state_change >= DEAD_TIME:
-                    current_state = S_BOOST
-                    last_state_change = now
-            
-            elif current_state == S_BOOST:
-                seq_tag = "BOOST"
-                if now - last_state_change >= RUN_TIME:
-                    current_state = S_DEAD_2
-                    last_state_change = now
-            
-            elif current_state == S_DEAD_2:
-                seq_tag = "DEAD_TIME"
-                if now - last_state_change >= DEAD_TIME:
-                    current_state = S_BUCK
-                    last_state_change = now
-
-            # --- B. CAN HEARTBEAT ---
+            # --- A. CAN HEARTBEAT (CONSTANT BUCK) ---
             if now - last_can_time >= (1.0 / CAN_HZ):
-                if current_state == S_BUCK:
-                    send_command(run=True, direction=0, hs_v=BUCK_HSV, ls_v=BUCK_LSV, ls_curr=BUCK_AMP)
-                elif current_state == S_BOOST:
-                    send_command(run=True, direction=1, hs_v=BOOST_HSV, ls_v=BOOST_LSV, ls_curr=BOOST_AMP)
-                else: # Dead states
-                    # Command run=False but maintain nominal target voltages to prevent shock
-                    send_command(run=False, direction=0, hs_v=48.0, ls_v=24.0, ls_curr=0.0)
+                # If the BMS is in Mode 1, it has rejected the charge command.
+                # We must ensure our request is significantly lower than BMS OVP.
+                send_command(run=True, direction=0, hs_v=BUCK_HSV, ls_v=BUCK_LSV, ls_curr=BUCK_AMP)
                 last_can_time = now
 
-            # --- C. READ TELEMETRY ---
+            # --- B. READ TELEMETRY ---
             msg = bus.recv(0.001)
             active_faults = "None"
             if msg:
@@ -151,7 +165,7 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
                     faults = [k.replace('DCDC_ERROR_', '') for k, v in data.items() if 'ERROR' in k and v == 1]
                     if faults: active_faults = "|".join(faults)
 
-            # --- D. LOGGING & PRINTING ---
+            # --- C. LOGGING & PRINTING ---
             if now - last_log_time >= (1.0 / LOG_HZ):
                 writer.writerow([timestamp_str, seq_tag, current_mode, round(telem["HS_V"], 2), round(telem["LS_V"], 2), round(telem["HS_A"], 2), round(telem["LS_A"], 2), active_faults])
                 last_log_time = now
@@ -160,7 +174,6 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
                 if active_faults != "None":
                     print(f"[{timestamp_str}] !!! FAULT: {active_faults} !!! (Mode: {current_mode})")
                 else:
-                    # New Print Format with Mode and Tag
                     print(f"[{timestamp_str}] [{seq_tag:9} | Mode:{current_mode}] HS_V:{telem['HS_V']:05.2f}V | LS_V:{telem['LS_V']:05.2f}V | HS_A:{telem['HS_A']:05.2f}A | LS_A:{telem['LS_A']:05.2f}A")
                 last_print_time = now
 
