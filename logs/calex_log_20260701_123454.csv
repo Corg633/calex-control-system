@@ -1,0 +1,7 @@
+Timestamp,Sequence,Mode,HS_V,LS_V,HS_A,LS_A,Faults
+12:35:02.623,BUCK,0,0,0,0,0,None
+12:35:02.724,BUCK,0,0,0,0,0,None
+12:35:02.824,BUCK,0,0,0,0,0,None
+12:35:02.924,BUCK,0,0,0,0,0,None
+12:35:03.024,BUCK,0,0,0,0,0,None
+12:35:03.124,BOOST,0,0,0,0,0,None
