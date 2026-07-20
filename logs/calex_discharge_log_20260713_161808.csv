@@ -1,0 +1,4 @@
+Timestamp,Sequence,Mode,HS_V,LS_V,HS_A,LS_A,Faults
+16:18:14.251,BOOST_DIS,0,0,0,0,0,None
+16:18:14.757,BOOST_DIS,0,0.02,29.18,0.0,0.0,None
+16:18:15.259,BOOST_DIS,0,0.02,29.18,0.0,0.0,None

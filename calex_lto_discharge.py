@@ -18,18 +18,18 @@ LOG_HZ = 10.0
 # ==========================================
 # BMS Wake-Up Settings (Still needed to latch the BMS initially)
 BMS_WAKE_LSV = 33.0     
-BMS_WAKE_AMP = 2.0      
-BMS_WAKE_TIME = 3.0     
+BMS_WAKE_AMP = 0.0      
+BMS_WAKE_TIME = 1.0     
 
 # Normal Operation Settings (CONTINUOUS DISCHARGE)
 # Boost (Discharging Battery into 1-Ohm Resistor)
-BOOST_HSV = 51.0        # Headroom to push current into the 48V node
-BOOST_LSV = 20.4 #26.4        # SAFTEY LIMIT: 2.2V/cell. Stops the JKBMS from tripping at 1.8V!
-BOOST_AMP = 60.0 #40.0        # Set to 40A. Warning: 40A into 1-Ohm = 1600W of heat! 
+BOOST_HSV = 52.0        # Headroom to push current into the 48V node
+BOOST_LSV = 24.0 - 4.0 #20.0 + 0.0 #26.4        # SAFTEY LIMIT: 2.2V/cell. Stops the JKBMS from tripping at 1.8V!
+BOOST_AMP = 45.0 #40.0        # Set to 40A. Warning: 40A into 1-Ohm = 1600W of heat! 
 
 # Dummy Buck params for wake-up only
 BUCK_HSV = 48.0         
-BUCK_LSV = 33.6         
+BUCK_LSV = 40.0 #33.9         
 
 # ==========================================
 # 3. DIRECTORY & FILE SETUP
@@ -42,7 +42,7 @@ CSV_FILENAME = os.path.join(LOG_DIR, f"calex_discharge_log_{datetime.now().strft
 
 try:
     db = cantools.database.load_file(DBC_PATH)
-    bus = can.interface.Bus(interface='socketcan', channel='can0')
+    bus = can.interface.Bus(interface='socketcan', channel='can1')
 except Exception as e:
     print(f"CRITICAL ERROR: {e}")
     sys.exit(1)
@@ -90,7 +90,7 @@ time.sleep(3.0)
 
 print("[BOOT] 3. Sending safety limits and clearing hardware faults...")
 try:
-    bus.send(can.Message(arbitration_id=0x261, data=db.encode_message('LimitMsg', {'LIM_HS_OVP': 56.0, 'LIM_LS_OVP': 35.0, 'LIM_HS_UVP': 36.0, 'LIM_LS_UVP': 18.0}), is_extended_id=False), timeout=0.1)
+    bus.send(can.Message(arbitration_id=0x261, data=db.encode_message('LimitMsg', {'LIM_HS_OVP': 58.0, 'LIM_LS_OVP': 40.0, 'LIM_HS_UVP': 22.5, 'LIM_LS_UVP': 20.0}), is_extended_id=False), timeout=0.1)
 except Exception as e:
     print(f"   [WARNING] LimitMsg failed to send ({e}). Calex might still be booting.")
 
@@ -128,18 +128,30 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
     telem = {"HS_V": 0, "LS_V": 0, "HS_A": 0, "LS_A": 0}
     current_mode = 0
 
+    active_faults = "None"
+
     try:
         while True:
             now = time.time()
             timestamp_str = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-
-            # --- A. CAN HEARTBEAT (CONSTANT BOOST) ---
+            
+            # --- A. FAULT RECOVERY ROUTINE ---
+            # If the Calex reports an error, toggle CMD_RUN to clear it
+            if active_faults != "None":
+                print(f"[{timestamp_str}] !!! FAULT DETECTED: {active_faults}. Clearing...")
+                send_command(run=False, direction=1, hs_v=BOOST_HSV, ls_v=BOOST_LSV, ls_curr=0.0)
+                time.sleep(0.5) # Allow internal state to clear
+                # Reset Faults is handled automatically by the next run=True cycle
+            
+            # --- B. CAN HEARTBEAT (CONSTANT BOOST) ---
             if now - last_can_time >= (1.0 / CAN_HZ):
-                # Direction 1 = Boost (Discharge battery)
+                # Ensure the Target LS_V is significantly lower than current battery V 
+                # to force the converter to pull the full 45A (Constant Current mode)
                 send_command(run=True, direction=1, hs_v=BOOST_HSV, ls_v=BOOST_LSV, ls_curr=BOOST_AMP)
                 last_can_time = now
 
-            # --- B. READ TELEMETRY ---
+            # --- C. READ TELEMETRY ---
+            # ... (Keep your existing message decoding logic)
             msg = bus.recv(0.001)
             active_faults = "None"
             if msg:
@@ -151,7 +163,7 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
                     telem["LS_A"] = data.get('LS_CURR_MEAS', 0)
                 elif msg.arbitration_id == 0x269:
                     data = db.decode_message(msg.arbitration_id, msg.data)
-                    current_mode = data.get('DCDC_MODE', 0)
+                    #current_mode = data.get('DCDC_MODE', 0)
                     faults = [k.replace('DCDC_ERROR_', '') for k, v in data.items() if 'ERROR' in k and v == 1]
                     if faults: active_faults = "|".join(faults)
 
