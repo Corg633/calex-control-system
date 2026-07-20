@@ -21,19 +21,19 @@ DEAD_TIME = 0.001      # Hardware relay switch time
 # ==========================================
 # BMS Wake-Up Settings
 BMS_WAKE_LSV = 33.0     
-BMS_WAKE_AMP = 2.0      
-BMS_WAKE_TIME = 3.0     
+BMS_WAKE_AMP = 0.0      
+BMS_WAKE_TIME = 1.0     
 
 # Normal Operation Settings (60A PULSE LIMITS)
 # Buck (Charging Battery)
-BUCK_HSV = 42.0         
-BUCK_LSV = 34.9         # 12S LTO Absolute Max - Provides headroom for 60A
+BUCK_HSV = 42.0 + 0.0  # not 42.0!    
+BUCK_LSV = 34.9 #34.9 + 0.0      # 12S LTO Absolute Max - Provides headroom for 60A
 BUCK_AMP = 30.0         # 60 Amps into the LTO Pack
 
 # Boost (Discharging Battery into 1-Ohm Resistor)
 BOOST_HSV = 52.0        # Pushing up to 51V into the 48V node (allows 60A to flow into resistor)
-BOOST_LSV = 24.0        # Drops target LVS so Calex pulls current from the battery
-BOOST_AMP = 60.0        # 60 Amps pulled from the LTO Pack
+BOOST_LSV = 24.0 - 2.0    # Drops target LVS so Calex pulls current from the battery
+BOOST_AMP = 50.0        # 60 Amps pulled from the LTO Pack
 
 # ==========================================
 # 3. DIRECTORY & FILE SETUP
@@ -46,7 +46,7 @@ CSV_FILENAME = os.path.join(LOG_DIR, f"calex_log_{datetime.now().strftime('%Y%m%
 
 try:
     db = cantools.database.load_file(DBC_PATH)
-    bus = can.interface.Bus(interface='socketcan', channel='can0')
+    bus = can.interface.Bus(interface='socketcan', channel='can1')
 except Exception as e:
     print(f"CRITICAL ERROR: {e}")
     sys.exit(1)
@@ -79,9 +79,10 @@ def send_command(run, direction, hs_v, ls_v, ls_curr):
     except Exception:
         pass
 
+
 # ==========================================
 # 5. INITIALIZATION & SAFETY
-# ==========================================
+# ==========================================z
 setup_gpio()
 
 print("\n[BOOT] 1. Closing Pre-Charge Relay (PQ.06) to trick Calex...")
@@ -92,12 +93,18 @@ print("[BOOT] 2. Waking Calex (PAC.06 LOW)... waiting for DSP to boot...")
 os.system('echo 0 > /sys/class/gpio/PAC.06/value')
 time.sleep(3.0) 
 
-print("[BOOT] 3. Sending safety limits and clearing hardware faults...")
+print("\n[BOOT] 3. Sending safety limits and clearing hardware faults...")
 try:
-    bus.send(can.Message(arbitration_id=0x261, data=db.encode_message('LimitMsg', {'LIM_HS_OVP': 56.0, 'LIM_LS_OVP': 35.0, 'LIM_HS_UVP': 36.0, 'LIM_LS_UVP': 18.0}), is_extended_id=False), timeout=0.1)
+    # UPDATED: Using CAN Min values from protocol to avoid 6_CAN_OOR fault
+    limit_msg = db.encode_message('LimitMsg', {
+        'LIM_HS_OVP': 56.0,  # Max allowed
+        'LIM_HS_UVP': 22.5,  # CAN Min is 22.5
+        'LIM_LS_OVP': 40.0,  # Max allowed
+        'LIM_LS_UVP': 20.0   # CAN Min is 20.0
+    })
+    bus.send(can.Message(arbitration_id=0x261, data=limit_msg, is_extended_id=False), timeout=0.1)
 except Exception as e:
-    print(f"   [WARNING] LimitMsg failed to send ({e}). Calex might still be booting.")
-
+    print(f"   [WARNING] LimitMsg failed to send ({e}).")
 send_command(False, 0, 48.0, 24.0, 0.0) 
 time.sleep(0.5)
 
@@ -171,8 +178,12 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
 
             # --- B. CAN HEARTBEAT ---
             if now - last_can_time >= (1.0 / CAN_HZ):
+                bus.send(can.Message(arbitration_id=0x261, data=limit_msg, is_extended_id=False))
+                
+                # 2. Send Command
                 if current_state == S_BUCK:
                     send_command(run=True, direction=0, hs_v=BUCK_HSV, ls_v=BUCK_LSV, ls_curr=BUCK_AMP)
+                # ... rest of your logic
                 elif current_state == S_BOOST:
                     send_command(run=True, direction=1, hs_v=BOOST_HSV, ls_v=BOOST_LSV, ls_curr=BOOST_AMP)
                 else: 
